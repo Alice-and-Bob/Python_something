@@ -1,6 +1,5 @@
 # 迷之网络问题，迷之解决……
 # TODO：添加对多种图片格式的支持，目前只支持jpg
-# TODO：添加断点处理
 import os
 import re
 import time
@@ -13,9 +12,18 @@ import urllib3
 
 lock = threading.Lock()
 tag_address = {}  # 章节_页数:图片真实地址
+comic_number = 0
+dirname = "H:\\"
+comic_name = ''
 
 
 class Http404Exception(Exception):
+    pass
+
+
+def input_and_search():
+    # from urllib import parse
+    # https://so.kukudm.com/search.asp?kw=%C5%AE%D3%D1
     pass
 
 
@@ -25,7 +33,7 @@ def get_chapters_addr(content_url):
     with requests.session() as req:
         req.keep_alive = False
         res = req.get(content_url, verify=False)
-        res.encoding = res.apparent_encoding
+        res.encoding = 'gbk'
         soup = bs4.BeautifulSoup(res.text, "html.parser")
         temp = soup.find_all("a")
         tempp = []
@@ -38,15 +46,14 @@ def get_chapters_addr(content_url):
         temppp = []  # 最终得到的章节地址
         for ii in tempp:
             temppp.append((re.findall(r, str(ii))[0]))
-        return list(temppp)
-        # with open("a.txt", 'w') as f:
-        #     for iii in temppp:
-        #         f.writelines(str(iii).replace("['", "").replace("']", ""))
-        #         f.writelines('\n')
+
+        comic_name_cn = str(soup.find_all(colspan="2")[6].next).replace("漫画", "")
+
+        return list(temppp), comic_name_cn
 
 
 def get_pic_addr(html, chp, page):
-    domain = "http://comic3.kkkkdm.com/comiclist/3012/"
+    domain = "http://comic3.kkkkdm.com/comiclist/" + str(comic_number) + '/'
     middle = html.split('/')[5]
     url = domain + middle + "/" + str(page) + '.htm'
     try:
@@ -58,7 +65,7 @@ def get_pic_addr(html, chp, page):
         soup = bs4.BeautifulSoup(r.text, "html.parser")
         temp_string = str(soup.find_all(language="javascript")[2])
         # print(temp_string)
-        rr = r'newkuku.*jpg\'></a>'
+        rr = r'newkuku.*?jpg\'>'
         ans = re.findall(rr, temp_string)
         rrr = r'newkuku.*jpg'
         anss = re.findall(rrr, ans[0])[0]  # 图片真实地址的低位
@@ -75,7 +82,7 @@ def get_pic_addr(html, chp, page):
 
 def get_and_process_pic(pic_addr, chp, page):
     pic_domain = "http://s4.kukudm.com/"
-    pic_url = pic_domain + '1' + pic_addr
+    pic_url = pic_domain + pic_addr
 
     header = {
         'Host': 'v2.kukudm.com',
@@ -98,15 +105,15 @@ def get_and_process_pic(pic_addr, chp, page):
 
     try:
         r = requests.get(pic_url, verify=False, stream=True)
-        if not os.path.exists('D:\\个人项目\\python_something\\anime_spider\\b\\'):
-            os.makedirs('D:\\个人项目\\python_something\\anime_spider\\b\\')
+        if not os.path.exists(dirname):
+            os.makedirs(dirname)
         else:
             pass
 
         # 通过检测返回体前部是否是jpg幻数判断是否爬取成功
-        if r.content[0:3] is not b'\xff\xd8\xff':
+        if r.content[0:3] != b'\xff\xd8\xff':
             raise Http404Exception
-        with open("b\\" + str(chp) + '_' + str(page) + ".jpg", "wb") as pic:  # FIXED:无法自动创建新的文件夹存放图片
+        with open(dirname + str(chp) + '_' + str(page) + ".jpg", "wb") as pic:  # FIXED:无法自动创建新的文件夹存放图片
             pic.write(r.content)
         print("success")
     except Http404Exception:
@@ -126,41 +133,50 @@ def get_and_process_pic(pic_addr, chp, page):
 if __name__ == '__main__':
     # ------------控制参数-------------
     max_workers = 10  # 线程并发数量
-    url = "http://comic.kkkkdm.com/comiclist/3012/"  # 要爬取的漫画目录页
-
+    # url = str(input("输入要爬取到的漫画目录页url:\n"))
+    # comic_number = url.split('/')[4]
+    url = "http://comic.kkkkdm.com/comiclist/2333/"  # 要爬取的漫画目录页
+    comic_number = url.split('/')[4]
     # ------------控制参数-------------
 
     start_time = time.time()
 
     # 通过漫画目录页爬取章节地址
-    chp_addrs = get_chapters_addr(url)
+    chp_addrs, name = get_chapters_addr(url)
+    dirname = dirname + name + '\\'
+
 
     # 多线程爬取
     def a(chp):
-        page = 1
+        page = 0
         while 1:
+            page = page + 1
             print(str(chp + 1), "章", str(page), "页开始")
-            addr = get_pic_addr(chp_addrs[chp], chp + 1, page)
-            if addr is None:
-                break
-            elif addr is -1:
+            if os.path.exists(dirname + str(chp + 1) + '_' + str(page) + ".jpg"):
+                print(str(chp + 1), "章", str(page), "页已有")
                 continue
             else:
-                get_and_process_pic(addr, chp + 1, page)
-            page = page + 1
+                addr = get_pic_addr(chp_addrs[chp], chp + 1, page)
+                if addr is None:
+                    break
+                elif addr is -1:
+                    continue
+                else:
+                    get_and_process_pic(addr, chp + 1, page)
+
         print(str(chp), "章爬完")
+        return
 
 
     chps = []
     for i in range(0, chp_addrs.__len__()):
         chps.append(i)
-    # print("")
+    # a(chps[0])
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         pool.map(a, chps)  # FIXED:无法自动退出线程池
 
     # 将爬取到的图片制作成PDF文件以便阅读
-    dirname = "D:\\个人项目\\python_something\\anime_spider\\b\\"
-    with open("女友成双.pdf", "wb") as f:
+    with open(dirname + name + ".pdf", "wb") as f:
         imgs = []
         for chp in range(1, 54):
             page = 1
